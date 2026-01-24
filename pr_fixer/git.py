@@ -2,11 +2,88 @@
 
 import json
 import re
+import shutil
 import subprocess
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .github import PRInfo
+
+
+def is_ghstack_pr(branch_name: str) -> bool:
+    """
+    Detect if a PR is using ghstack based on its branch name.
+
+    ghstack PRs have branch names matching the pattern:
+    - gh/<username>/<number>/head
+    - gh/<username>/<number>/base
+    - gh/<username>/<number>/orig
+
+    Args:
+        branch_name: The branch name to check
+
+    Returns:
+        True if this appears to be a ghstack branch, False otherwise
+    """
+    # Pattern: gh/<username>/<number>/<suffix>
+    # where suffix is typically 'head', 'base', or 'orig'
+    pattern = r'^gh/[^/]+/\d+/(head|base|orig)$'
+    return bool(re.match(pattern, branch_name))
+
+
+def check_ghstack_available() -> bool:
+    """
+    Check if ghstack is installed and available.
+
+    Returns:
+        True if ghstack is available, False otherwise
+    """
+    return shutil.which("ghstack") is not None
+
+
+class GhstackError(Exception):
+    """Raised when a ghstack operation fails."""
+    pass
+
+
+def checkout_ghstack_pr(pr_url: str, cwd: str | None = None) -> None:
+    """
+    Checkout a PR using ghstack.
+
+    This runs `ghstack checkout <pr_url>` to checkout the PR branch.
+
+    Args:
+        pr_url: The full GitHub PR URL
+        cwd: Working directory to run the command in (defaults to current directory)
+
+    Raises:
+        GhstackError: If ghstack is not installed or the checkout fails
+    """
+    if not check_ghstack_available():
+        raise GhstackError(
+            "ghstack is not installed. Install it with: pip install ghstack\n"
+            "See https://github.com/ezyang/ghstack for details."
+        )
+
+    cmd = ["ghstack", "checkout", pr_url]
+
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            check=True,
+            cwd=cwd
+        )
+    except subprocess.CalledProcessError as e:
+        error_msg = e.stderr.strip() if e.stderr else str(e)
+        raise GhstackError(
+            f"Failed to checkout PR with ghstack: {error_msg}"
+        ) from e
+    except FileNotFoundError:
+        raise GhstackError(
+            "ghstack not found. Please install it with: pip install ghstack"
+        )
 
 
 class GitError(Exception):

@@ -10,11 +10,14 @@ from .git import (
     validate_repository,
     get_pr_branch_name,
     checkout_pr_branch,
+    checkout_ghstack_pr,
+    is_ghstack_pr,
     get_current_branch,
     check_uncommitted_changes,
     require_clean_working_directory,
     GitError,
     GitHubCLIError as GitGitHubCLIError,
+    GhstackError,
     RepositoryMismatchError,
     UncommittedChangesError,
 )
@@ -171,6 +174,11 @@ def main() -> int:
         print(f"Error fetching PR branch name: {e}", file=sys.stderr)
         return 1
 
+    # Detect if this is a ghstack PR
+    use_ghstack = is_ghstack_pr(branch_name)
+    if use_ghstack and args.verbose:
+        print("Detected ghstack PR")
+
     # Step 3: Checkout the PR branch (unless --skip-checkout is set)
     if args.skip_checkout:
         if args.verbose:
@@ -202,10 +210,20 @@ def main() -> int:
                 print(f"Warning: Could not determine current branch: {e}")
 
         try:
-            print(f"Checking out branch: {branch_name}")
-            checkout_pr_branch(branch_name, cwd=working_dir)
-            print(f"Successfully checked out branch: {branch_name}")
+            if use_ghstack:
+                # Use ghstack checkout for ghstack PRs
+                print(f"Checking out ghstack PR: {pr_info.url}")
+                checkout_ghstack_pr(pr_info.url, cwd=working_dir)
+                print(f"Successfully checked out ghstack PR")
+            else:
+                # Use regular git checkout for normal PRs
+                print(f"Checking out branch: {branch_name}")
+                checkout_pr_branch(branch_name, cwd=working_dir)
+                print(f"Successfully checked out branch: {branch_name}")
             print()
+        except GhstackError as e:
+            print(f"Error checking out ghstack PR: {e}", file=sys.stderr)
+            return 1
         except GitError as e:
             print(f"Error checking out branch: {e}", file=sys.stderr)
             return 1

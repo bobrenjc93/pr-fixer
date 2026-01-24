@@ -8,16 +8,142 @@ import pytest
 from pr_fixer.git import (
     get_pr_branch_name,
     checkout_pr_branch,
+    checkout_ghstack_pr,
+    is_ghstack_pr,
+    check_ghstack_available,
     validate_repository,
     get_current_branch,
     check_uncommitted_changes,
     require_clean_working_directory,
     GitError,
     GitHubCLIError,
+    GhstackError,
     RepositoryMismatchError,
     UncommittedChangesError,
 )
 from pr_fixer.github import PRInfo
+
+
+class TestIsGhstackPR:
+    """Tests for is_ghstack_pr function."""
+
+    def test_ghstack_head_branch(self):
+        """Test detection of ghstack head branch."""
+        assert is_ghstack_pr("gh/username/123/head") is True
+
+    def test_ghstack_base_branch(self):
+        """Test detection of ghstack base branch."""
+        assert is_ghstack_pr("gh/username/456/base") is True
+
+    def test_ghstack_orig_branch(self):
+        """Test detection of ghstack orig branch."""
+        assert is_ghstack_pr("gh/user/789/orig") is True
+
+    def test_regular_feature_branch(self):
+        """Test that regular feature branches are not detected as ghstack."""
+        assert is_ghstack_pr("feature/my-feature") is False
+
+    def test_main_branch(self):
+        """Test that main branch is not detected as ghstack."""
+        assert is_ghstack_pr("main") is False
+
+    def test_branch_with_slashes(self):
+        """Test that branches with slashes but wrong pattern are not ghstack."""
+        assert is_ghstack_pr("user/feature/add-thing") is False
+
+    def test_gh_prefix_wrong_format(self):
+        """Test that gh prefix with wrong format is not ghstack."""
+        assert is_ghstack_pr("gh/username") is False
+        assert is_ghstack_pr("gh/username/123") is False
+        assert is_ghstack_pr("gh/username/not-a-number/head") is False
+
+    def test_ghstack_with_complex_username(self):
+        """Test ghstack detection with complex usernames."""
+        assert is_ghstack_pr("gh/user-name_123/456/head") is True
+
+
+class TestCheckGhstackAvailable:
+    """Tests for check_ghstack_available function."""
+
+    @patch("pr_fixer.git.shutil.which")
+    def test_ghstack_available(self, mock_which):
+        """Test that returns True when ghstack is available."""
+        mock_which.return_value = "/usr/local/bin/ghstack"
+
+        assert check_ghstack_available() is True
+        mock_which.assert_called_once_with("ghstack")
+
+    @patch("pr_fixer.git.shutil.which")
+    def test_ghstack_not_available(self, mock_which):
+        """Test that returns False when ghstack is not available."""
+        mock_which.return_value = None
+
+        assert check_ghstack_available() is False
+
+
+class TestCheckoutGhstackPR:
+    """Tests for checkout_ghstack_pr function."""
+
+    @patch("pr_fixer.git.check_ghstack_available")
+    @patch("pr_fixer.git.subprocess.run")
+    def test_successful_checkout(self, mock_run, mock_available):
+        """Test successful ghstack checkout."""
+        mock_available.return_value = True
+        mock_run.return_value = MagicMock(returncode=0)
+
+        checkout_ghstack_pr("https://github.com/owner/repo/pull/123")
+
+        mock_run.assert_called_once()
+        cmd = mock_run.call_args[0][0]
+        assert cmd == ["ghstack", "checkout", "https://github.com/owner/repo/pull/123"]
+
+    @patch("pr_fixer.git.check_ghstack_available")
+    @patch("pr_fixer.git.subprocess.run")
+    def test_checkout_with_cwd(self, mock_run, mock_available):
+        """Test ghstack checkout with working directory."""
+        mock_available.return_value = True
+        mock_run.return_value = MagicMock(returncode=0)
+
+        checkout_ghstack_pr("https://github.com/owner/repo/pull/123", cwd="/path/to/repo")
+
+        call_kwargs = mock_run.call_args[1]
+        assert call_kwargs.get("cwd") == "/path/to/repo"
+
+    @patch("pr_fixer.git.check_ghstack_available")
+    def test_ghstack_not_installed(self, mock_available):
+        """Test error when ghstack is not installed."""
+        mock_available.return_value = False
+
+        with pytest.raises(GhstackError) as exc_info:
+            checkout_ghstack_pr("https://github.com/owner/repo/pull/123")
+        assert "ghstack is not installed" in str(exc_info.value)
+        assert "pip install ghstack" in str(exc_info.value)
+
+    @patch("pr_fixer.git.check_ghstack_available")
+    @patch("pr_fixer.git.subprocess.run")
+    def test_checkout_command_fails(self, mock_run, mock_available):
+        """Test error when ghstack checkout command fails."""
+        mock_available.return_value = True
+        mock_run.side_effect = subprocess.CalledProcessError(
+            returncode=1,
+            cmd=["ghstack", "checkout"],
+            stderr="PR not found"
+        )
+
+        with pytest.raises(GhstackError) as exc_info:
+            checkout_ghstack_pr("https://github.com/owner/repo/pull/999")
+        assert "Failed to checkout PR with ghstack" in str(exc_info.value)
+
+    @patch("pr_fixer.git.check_ghstack_available")
+    @patch("pr_fixer.git.subprocess.run")
+    def test_ghstack_file_not_found(self, mock_run, mock_available):
+        """Test error when ghstack binary disappears mid-execution."""
+        mock_available.return_value = True
+        mock_run.side_effect = FileNotFoundError()
+
+        with pytest.raises(GhstackError) as exc_info:
+            checkout_ghstack_pr("https://github.com/owner/repo/pull/123")
+        assert "ghstack not found" in str(exc_info.value)
 
 
 class TestGetPRBranchName:
