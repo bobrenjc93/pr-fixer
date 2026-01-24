@@ -1,0 +1,37 @@
+{
+  "name": "pr-fixer",
+  "version": "1.0.0",
+  "description": "CLI tool to automatically fix PR review comments using Claude",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "pr-fixer": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts",
+    "test": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "pr",
+    "pull-request",
+    "github",
+    "claude",
+    "code-review",
+    "automation"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "commander": "^12.1.0",
+    "execa": "^9.5.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8"
+  }
+}
