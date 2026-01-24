@@ -2,6 +2,7 @@
 
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Callable, TextIO
@@ -155,24 +156,38 @@ def process_comment(comment: "Comment", pr_url: str, working_dir: str | None = N
     # Using claude -p for programmatic/non-interactive mode
     cmd = ["claude", "-p", "--dangerously-skip-permissions", prompt]
 
-    try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            cwd=working_dir,
-            timeout=300  # 5 minute timeout for Claude to work
-        )
-    except FileNotFoundError:
-        raise ClaudeError(
-            "Claude CLI not found. Please install Claude Code CLI and ensure 'claude' is in your PATH."
-        )
-    except subprocess.TimeoutExpired:
-        raise ClaudeError(
-            "Claude CLI timed out after 5 minutes. The operation may be taking too long."
-        )
-    except Exception as e:
-        raise ClaudeError(f"Failed to run Claude CLI: {e}") from e
+    # Retry delays in seconds (exponential backoff: 10s, 20s, 40s)
+    retry_delays = [10, 20, 40]
+    max_attempts = 1 + len(retry_delays)  # Initial attempt + retries
+    last_exception = None
+
+    for attempt in range(max_attempts):
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                cwd=working_dir,
+            )
+            # Success - break out of retry loop
+            break
+        except FileNotFoundError:
+            raise ClaudeError(
+                "Claude CLI not found. Please install Claude Code CLI and ensure 'claude' is in your PATH."
+            )
+        except Exception as e:
+            last_exception = e
+            # Check if we have retries left
+            if attempt < len(retry_delays):
+                delay = retry_delays[attempt]
+                print(f"Claude CLI failed (attempt {attempt + 1}/{max_attempts}), retrying in {delay}s...", file=sys.stderr)
+                time.sleep(delay)
+            else:
+                # No more retries
+                raise ClaudeError(f"Failed to run Claude CLI after {max_attempts} attempts: {last_exception}") from last_exception
+    else:
+        # This should not be reached, but just in case
+        raise ClaudeError(f"Failed to run Claude CLI after {max_attempts} attempts: {last_exception}") from last_exception
 
     # Analyze the result
     # Claude CLI returns 0 on success
