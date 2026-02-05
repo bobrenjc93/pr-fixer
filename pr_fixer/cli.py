@@ -81,6 +81,12 @@ def create_parser() -> argparse.ArgumentParser:
     )
 
     parser.add_argument(
+        "--no-group",
+        action="store_true",
+        help="Process each comment individually instead of grouping by location",
+    )
+
+    parser.add_argument(
         "--version",
         action="version",
         version="%(prog)s 0.1.0",
@@ -251,8 +257,14 @@ def main() -> int:
     if args.dry_run:
         print("[Dry run] Would process the following comments:")
         print()
-        for i, comment in enumerate(all_comments.file_comments, 1):
-            print(f"  {i}. {comment}")
+        group_by_location = not args.no_group
+        if group_by_location:
+            grouped_comments = file_only_comments.all_comments_grouped
+            for i, comment in enumerate(grouped_comments, 1):
+                print(f"  {i}. {comment}")
+        else:
+            for i, comment in enumerate(all_comments.file_comments, 1):
+                print(f"  {i}. {comment}")
         print()
         print("[Dry run] No changes made.")
         return 0
@@ -275,6 +287,7 @@ def main() -> int:
             pr_url=pr_info.url,
             working_dir=working_dir,
             verbose=args.verbose,
+            group_by_location=not args.no_group,
         )
     except ClaudeError as e:
         print(f"Error invoking Claude: {e}", file=sys.stderr)

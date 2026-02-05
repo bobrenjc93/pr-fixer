@@ -8,7 +8,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Callable, TextIO
 
 if TYPE_CHECKING:
-    from .models import Comment, InlineComment, AllComments
+    from .models import Comment, InlineComment, CommentGroup, AllComments
 
 
 class ClaudeError(Exception):
@@ -48,10 +48,18 @@ def _build_prompt_for_comment(comment: "Comment", pr_url: str) -> str:
     Returns:
         A prompt string for Claude
     """
-    from .models import InlineComment, ReviewComment, PRComment
+    from .models import InlineComment, ReviewComment, PRComment, CommentGroup
 
     # Build context based on comment type
-    if isinstance(comment, InlineComment):
+    if isinstance(comment, CommentGroup):
+        location_context = f"""COMMENT TYPE: Multiple inline code comments at the same location
+FILE: {comment.path}
+LINE: {comment.effective_line or 'unknown'}
+NUMBER OF COMMENTS: {len(comment.comments)}
+
+IMPORTANT: Start by reading the file at {comment.path} to understand the context before making any changes.
+NOTE: Multiple reviewers or a discussion thread exists at this location. Consider all comments together."""
+    elif isinstance(comment, InlineComment):
         location_context = f"""COMMENT TYPE: Inline code comment
 FILE: {comment.path}
 LINE: {comment.effective_line or 'unknown'}
@@ -332,10 +340,15 @@ class ProgressReporter:
             total: Total number of comments to process
             comment: The comment about to be processed
         """
-        from .models import InlineComment, ReviewComment
+        from .models import InlineComment, ReviewComment, CommentGroup
 
         # Create a brief description of the comment
-        if isinstance(comment, InlineComment):
+        if isinstance(comment, CommentGroup):
+            location = f" on {comment.path}"
+            if comment.effective_line:
+                location += f":{comment.effective_line}"
+            location += f" ({len(comment.comments)} comments)"
+        elif isinstance(comment, InlineComment):
             location = f" on {comment.path}"
             if comment.effective_line:
                 location += f":{comment.effective_line}"
@@ -404,6 +417,7 @@ def process_all_comments(
     working_dir: str | None = None,
     on_progress: Callable[[int, int, "Comment"], None] | None = None,
     on_comment_complete: Callable[[int, int, "Comment", CommentProcessingResult], None] | None = None,
+    group_by_location: bool = True,
 ) -> AllCommentsProcessingResult:
     """
     Process all PR comments sequentially using Claude CLI.
@@ -420,6 +434,7 @@ def process_all_comments(
                      before processing each comment for progress reporting
         on_comment_complete: Optional callback function called with (index, total, comment, result)
                              after processing each comment
+        group_by_location: If True (default), group inline comments on the same line together
 
     Returns:
         AllCommentsProcessingResult with summary of all processing outcomes
@@ -427,7 +442,10 @@ def process_all_comments(
     Raises:
         ClaudeError: If Claude CLI is not available (fails on first invocation)
     """
-    comments = all_comments.all_comments
+    if group_by_location:
+        comments = all_comments.all_comments_grouped
+    else:
+        comments = all_comments.all_comments
     total = len(comments)
 
     results: list[tuple["Comment", CommentProcessingResult]] = []
@@ -478,6 +496,7 @@ def process_all_comments_with_progress(
     working_dir: str | None = None,
     verbose: bool = False,
     output: TextIO | None = None,
+    group_by_location: bool = True,
 ) -> AllCommentsProcessingResult:
     """
     Process all PR comments with built-in progress reporting.
@@ -491,6 +510,7 @@ def process_all_comments_with_progress(
         working_dir: Optional working directory to run Claude in
         verbose: If True, include more detailed information in output
         output: Optional output stream (defaults to sys.stdout)
+        group_by_location: If True (default), group inline comments on the same line together
 
     Returns:
         AllCommentsProcessingResult with summary of all processing outcomes
@@ -500,10 +520,15 @@ def process_all_comments_with_progress(
     """
     reporter = ProgressReporter(output=output, verbose=verbose)
 
-    # Report start
-    reporter.on_start(all_comments.total_count)
+    if group_by_location:
+        effective_count = len(all_comments.all_comments_grouped)
+    else:
+        effective_count = all_comments.total_count
 
-    if all_comments.total_count == 0:
+    # Report start
+    reporter.on_start(effective_count)
+
+    if effective_count == 0:
         return AllCommentsProcessingResult(
             results=[],
             total_comments=0,
@@ -519,6 +544,7 @@ def process_all_comments_with_progress(
         working_dir=working_dir,
         on_progress=reporter.on_comment_start,
         on_comment_complete=reporter.on_comment_complete,
+        group_by_location=group_by_location,
     )
 
     # Report completion
