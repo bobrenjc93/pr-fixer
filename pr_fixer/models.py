@@ -76,6 +76,16 @@ class AllComments:
         return result
 
     @property
+    def file_comments(self) -> list[InlineComment]:
+        """Return only comments associated with specific files (inline comments)."""
+        return self.inline_comments
+
+    @property
+    def file_comments_count(self) -> int:
+        """Return count of comments associated with files."""
+        return len(self.inline_comments)
+
+    @property
     def total_count(self) -> int:
         """Return total number of comments across all types."""
         return (

@@ -6,6 +6,7 @@ import sys
 from typing import Optional
 
 from .github import parse_pr_url, fetch_all_comments, PRInfo, InvalidPRURLError, GitHubCLIError
+from .models import AllComments
 from .git import (
     validate_repository,
     get_pr_branch_name,
@@ -237,6 +238,10 @@ def main() -> int:
             print(f"  Review comments: {len(all_comments.review_comments)}")
             print(f"  Inline comments: {len(all_comments.inline_comments)}")
         print(f"Found {all_comments.total_count} comment(s) total.")
+        if all_comments.file_comments_count < all_comments.total_count:
+            skipped = all_comments.total_count - all_comments.file_comments_count
+            print(f"Skipping {skipped} comment(s) without file associations.")
+        print(f"Processing {all_comments.file_comments_count} inline comment(s).")
         print()
     except GitHubCLIError as e:
         print(f"Error fetching PR comments: {e}", file=sys.stderr)
@@ -246,20 +251,27 @@ def main() -> int:
     if args.dry_run:
         print("[Dry run] Would process the following comments:")
         print()
-        for i, comment in enumerate(all_comments.all_comments, 1):
+        for i, comment in enumerate(all_comments.file_comments, 1):
             print(f"  {i}. {comment}")
         print()
         print("[Dry run] No changes made.")
         return 0
 
-    # Step 5: Process each comment with Claude
-    if all_comments.total_count == 0:
-        print("No comments to process. Done!")
+    # Step 5: Process each inline comment with Claude (skip non-file comments)
+    if all_comments.file_comments_count == 0:
+        print("No inline comments to process. Done!")
         return 0
+
+    # Create a filtered AllComments with only inline comments
+    file_only_comments = AllComments(
+        discussion_comments=[],
+        review_comments=[],
+        inline_comments=all_comments.inline_comments,
+    )
 
     try:
         result = process_all_comments_with_progress(
-            all_comments=all_comments,
+            all_comments=file_only_comments,
             pr_url=pr_info.url,
             working_dir=working_dir,
             verbose=args.verbose,

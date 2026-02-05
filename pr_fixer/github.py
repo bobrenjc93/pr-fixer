@@ -243,23 +243,50 @@ def fetch_review_summaries(pr_info: PRInfo) -> list[ReviewComment]:
 
 def fetch_inline_comments(pr_info: PRInfo) -> list[InlineComment]:
     """
-    Fetch inline code comments from a GitHub PR using the gh CLI.
+    Fetch unresolved inline code comments from a GitHub PR using the GraphQL API.
 
-    Uses `gh api repos/:owner/:repo/pulls/<number>/comments` to retrieve
-    inline code review comments that are attached to specific lines of code.
+    Uses the GraphQL API to retrieve inline code review comments along with
+    their thread resolution status. Only comments from unresolved threads
+    are returned.
 
     Args:
         pr_info: PRInfo object containing owner, repo, and pr_number
 
     Returns:
-        List of InlineComment objects representing inline code comments
+        List of InlineComment objects representing unresolved inline code comments
 
     Raises:
         GitHubCLIError: If the gh CLI command fails
     """
+    graphql_query = """
+query($owner: String!, $repo: String!, $number: Int!) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      reviewThreads(first: 100) {
+        nodes {
+          isResolved
+          comments(first: 100) {
+            nodes {
+              author { login }
+              body
+              path
+              line
+              originalLine
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
     cmd = [
-        "gh", "api",
-        f"repos/{pr_info.owner}/{pr_info.repo}/pulls/{pr_info.pr_number}/comments"
+        "gh", "api", "graphql",
+        "-f", f"query={graphql_query}",
+        "-F", f"owner={pr_info.owner}",
+        "-F", f"repo={pr_info.repo}",
+        "-F", f"number={pr_info.pr_number}"
     ]
 
     try:
@@ -287,20 +314,29 @@ def fetch_inline_comments(pr_info: PRInfo) -> list[InlineComment]:
         ) from e
 
     inline_comments = []
-    for comment_data in data:
-        author = comment_data.get("user", {}).get("login", "unknown")
-        body = comment_data.get("body", "")
-        path = comment_data.get("path", "")
-        line = comment_data.get("line")
-        original_line = comment_data.get("original_line")
+    pr_data = data.get("data", {}).get("repository", {}).get("pullRequest", {})
+    threads = pr_data.get("reviewThreads", {}).get("nodes", [])
 
-        inline_comments.append(InlineComment(
-            author=author,
-            body=body,
-            path=path,
-            line=line,
-            original_line=original_line
-        ))
+    for thread in threads:
+        if thread.get("isResolved", False):
+            continue
+
+        comments = thread.get("comments", {}).get("nodes", [])
+        for comment_data in comments:
+            author_data = comment_data.get("author")
+            author = author_data.get("login", "unknown") if author_data else "unknown"
+            body = comment_data.get("body", "")
+            path = comment_data.get("path", "")
+            line = comment_data.get("line")
+            original_line = comment_data.get("originalLine")
+
+            inline_comments.append(InlineComment(
+                author=author,
+                body=body,
+                path=path,
+                line=line,
+                original_line=original_line
+            ))
 
     return inline_comments
 

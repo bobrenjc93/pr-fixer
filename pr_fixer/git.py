@@ -416,7 +416,7 @@ def check_uncommitted_changes(cwd: str | None = None) -> tuple[bool, list[str]]:
     Raises:
         GitError: If the git command fails
     """
-    cmd = ["git", "status", "--porcelain"]
+    cmd = ["git", "status", "--porcelain", "-uno"]
 
     try:
         result = subprocess.run(
